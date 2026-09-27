@@ -1,6 +1,19 @@
 import { useState, useEffect } from "react";
 
 const HISTORY_KEY = "tipout:history";
+const VERSION = "1.1.0";
+
+// === Dashboard integration (?embed=1 + postMessage event feed, source: "tipout-app") ===
+const EMBED =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("embed") === "1";
+const emit = (type, data = {}) => {
+  try {
+    window.parent.postMessage({ app: "tipout-app", source: "tipout-app", type, ...data }, "*");
+  } catch (e) {}
+};
+// Unique ids (Date.now() collides on fast double-taps)
+const uid = () => "n" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 const fmt = (val) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val || 0);
@@ -123,6 +136,17 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
 
+  // Dashboard handshake: announce readiness, answer pings
+  useEffect(() => {
+    emit("ready", { embed: EMBED, version: VERSION });
+    const onMsg = (e) => {
+      const d = e.data || {};
+      if (d && d.app === "tipout-app" && d.type === "ping") emit("pong", { embed: EMBED });
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
   // Load saved history on mount
   useEffect(() => {
     try {
@@ -160,7 +184,7 @@ export default function App() {
   const saveNight = () => {
     if (!hasData) return;
     const entry = {
-      id: Date.now(),
+      id: uid(),
       date: new Date().toISOString(),
       food, bar, sushi,
       numUtility, numBartenders,
@@ -168,12 +192,18 @@ export default function App() {
       utilityEach, barEach,
     };
     persist([entry, ...history]);
+    emit("night_saved", {
+      id: entry.id, date: entry.date,
+      food, bar, sushi, numUtility, numBartenders,
+      utilityPool, barPool, sushiPool, total, utilityEach, barEach,
+    });
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 1800);
   };
 
   const deleteEntry = (id) => {
     persist(history.filter((h) => h.id !== id));
+    emit("night_deleted", { id });
   };
 
   const fmtDate = (iso) => {
@@ -188,7 +218,7 @@ export default function App() {
       minHeight: "100vh",
       background: "#0d0d0d",
       fontFamily: "'Inter', system-ui, sans-serif",
-      padding: "32px 20px",
+      padding: EMBED ? "16px 12px" : "32px 20px",
     }}>
       <div style={{ maxWidth: 460, margin: "0 auto" }}>
 
